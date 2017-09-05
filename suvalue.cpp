@@ -50,9 +50,12 @@ size_t SuValue::hashfn() const
 	{ return ((ulong) this >> 4); } // default function just uses address
 
 int SuValue::integer() const
-	{ except("can't convert " << type() << " to integer"); }
+	{ except("can't convert " << type() << " to number"); }
 
 gcstring SuValue::gcstr() const
+	{ except("can't convert " << type() << " to String"); }
+
+gcstring SuValue::to_gcstr() const
 	{ except("can't convert " << type() << " to String"); }
 
 int SuValue::symnum() const

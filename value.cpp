@@ -36,22 +36,6 @@ bool Value::toBool() const
 		except("expected boolean, got " << type());
 	}
 
-
-const char* Value::str() const
-	{
-	return VAL->gcstr().str();
-	}
-
-gcstring Value::gcstr() const
-	{
-	return VAL->gcstr();
-	}
-
-gcstring Value::pack() const
-	{
-	return VAL->pack();
-	}
-
 Ostream& operator<<(Ostream& os, Value x)
 	{
 	if (x.is_int())
@@ -93,7 +77,7 @@ bool operator<(Value x, Value y)
 
 Value Value::operator-() const
 	{
-	return is_int() ? (Value) Value(-im.n) : (Value) neg(p->number());
+	return is_int() ? Value(-im.n) : Value(neg(p->number()));
 	}
 
 Value operator+(Value x, Value y)
@@ -148,7 +132,6 @@ Value operator/(Value x, Value y)
 
 
 #include "catstr.h"
-#include "except.h"
 
 void cantforce(const char* t1, const char* t2)
 	{

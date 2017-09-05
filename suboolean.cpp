@@ -24,22 +24,29 @@
 #include "sunumber.h"
 #include "ostream.h"
 #include "gcstring.h"
+#include "except.h"
 
 SuBoolean* SuBoolean::t = new SuBoolean(1);
 SuBoolean* SuBoolean::f = new SuBoolean(0);
 
 int SuBoolean::integer() const
-	{ return val; }
+	{
+	if (!val)
+		return 0; // false => 0
+	except("can't convert true to number");
+	}
 
 SuNumber* SuBoolean::number()
 	{
-	return val ? &SuNumber::one : &SuNumber::zero;
+	if (! val)
+		return &SuNumber::zero; // false => 0
+	except("can't convert true to number");
 	}
 
 void SuBoolean::out(Ostream& os) const
-	{ os << gcstr(); }
+	{ os << to_gcstr(); }
 
-gcstring SuBoolean::gcstr() const
+gcstring SuBoolean::to_gcstr() const
 	{
 	static gcstring ts("true");
 	static gcstring fs("false");
@@ -59,12 +66,12 @@ SuBoolean* SuBoolean::unpack(const gcstring& s)
 
 SuBoolean* SuBoolean::literal(const char* s)
 	{
-	if (0 == strcmp(s, "True") || 0 == strcmp(s, "true"))
+	if (0 == strcmp(s, "true"))
 		return t;
-	else if (0 == strcmp(s, "False") || 0 == strcmp(s, "false"))
+	else if (0 == strcmp(s, "false"))
 		return f;
 	else
-		return 0;
+		return nullptr;
 	}
 
 static int ord = ::order("Boolean");

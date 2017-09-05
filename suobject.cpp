@@ -892,11 +892,11 @@ Value SuObject::Add(short nargs, short nargnames, ushort* argnames, int each)
 	static ushort at = ::symnum("at");
 	if (nargnames > 1 || (nargnames == 1 && argnames[0] != at))
 		except("usage: object.Add(value, ... [ at: position ])");
-	int i = INT_MAX;
-	if (nargnames)
-		ARG(nargs - 1).int_if_num(&i);
-	else
+	int i;
+	if (!nargnames)
 		i = vec.size();
+	else if (! ARG(nargs - 1).int_if_num(&i))
+		i = -1;
 	if (0 <= i && i <= vec.size())
 		{
 		for (int j = 0; j < nargs - nargnames; ++j, ++i)
@@ -1097,21 +1097,29 @@ struct ObOutInKey
 		{ obout_inkey = false; }
 	};
 
-void SuObject::outdelims(Ostream& os, const char* delims) const
+const char* SuObject::toString() const
 	{
 	static Value ToString("ToString");
 
 	Value c = lookup(const_cast<SuObject*>(this), MethodFinder(ToString));
 	if (c && c != SuFalse)
 		{
-		Value x = c.call(const_cast<SuObject*>(this), ToString);
-		if (! x)
-			except("ToString must return a value");
-		if (const char* s = x.str_if_str())
-			os << s;
-		else
-			os << x;
-		return ;
+		KEEPSP
+		if (Value x = c.call(const_cast<SuObject*>(this), ToString))
+			if (const char* s = x.str_if_str())
+				return s;
+		except("ToString should return a string");
+		}
+	else
+		return nullptr;
+	}
+
+void SuObject::outdelims(Ostream& os, const char* delims) const
+	{
+	if (const char* s = toString())
+		{
+		os << s;
+		return;
 		}
 
 	if (auto n = myclass.get_named())
@@ -1142,10 +1150,20 @@ void SuObject::outdelims(Ostream& os, const char* delims) const
 		ObOutInKey ooik; // adjust output of keys
 		os << it->key;
 		}
-		os << ": " << it->val;
+		os << ':';
+		if (it->val != SuTrue)
+			os << ' ' << it->val;
 		}
 
 	os << delims[1];
+	}
+
+gcstring SuObject::to_gcstr() const
+	{
+	if (const char* s = toString())
+		return s;
+	else
+		return SuValue::to_gcstr(); // throw "can't convert"
 	}
 
 SuObject* SuObject::slice(size_t offset)

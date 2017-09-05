@@ -136,17 +136,13 @@ Value trace()
 	{
 	const int nargs = 2;
 	int prev_trace_level = trace_level;
-	if (ARG(0).int_if_num(&trace_level))
-		{
-		if (0 == (trace_level & (TRACE_CONSOLE | TRACE_LOGFILE)))
-			trace_level |= TRACE_CONSOLE | TRACE_LOGFILE;
-		}
+	if (val_cast<SuString*>(ARG(0)))
+		tout() << ARG(0).gcstr() << endl;
 	else
 		{
-		if (val_cast<SuString*>(ARG(0)))
-			tout() << ARG(0).gcstr() << endl;
-		else
-			tout() << ARG(0) << endl;
+		trace_level = ARG(0).integer();
+		if (0 == (trace_level & (TRACE_CONSOLE | TRACE_LOGFILE)))
+			trace_level |= TRACE_CONSOLE | TRACE_LOGFILE;
 		}
 	Value block = ARG(1);
 	if (block != SuFalse)
@@ -501,6 +497,31 @@ Value su_unixtime()
 	}
 PRIM(su_unixtime, "UnixTime()");
 
+Value su_finally()
+	{
+	const int nargs = 2;
+	KEEPSP
+	try
+		{
+		Value result = ARG(0).call(ARG(0), CALL);
+		ARG(1).call(ARG(1), CALL); // could throw
+		return result;
+		}
+	catch (...)
+		{
+		try
+			{
+			ARG(1).call(ARG(1), CALL);
+			}
+		catch (...)
+			{
+			// ignore exception from final_block if main_block threw
+			}
+		throw;
+		}
+	}
+PRIM(su_finally, "Finally(main_block, final_block)");
+
 // rich edit --------------------------------------------------------
 #include "rich.h"
 
@@ -644,8 +665,7 @@ Prim::Prim(PrimFn f, const char* d) : fn(f), decl(d)
 
 void builtins()
 	{
-	verify(FalseNum == globals("False"));
-	verify(TrueNum == globals("True"));
+	globals(""); // don't use the [0] slot
 	verify(OBJECT == globals("Object"));
 
 	INSTANTIATE = Value("instantiate");
@@ -684,8 +704,6 @@ void builtins()
 	builtin("resource", new TypeResource);
 
 	builtin("mkrec", new MkRec);
-	builtin("False", SuFalse);
-	builtin("True", SuTrue);
 	builtin("Object", root_class = new RootClass);
 	builtin("Suneido", new SuObject);
 	builtin("Construct", new Construct);

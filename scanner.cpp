@@ -35,7 +35,7 @@ char cclass_[256] =
 	0, WHITE, WHITE, WHITE, WHITE, WHITE, 0, 0,		// BS, HT, LF ...
 	0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0,
-	WHITE, GO, GO, OK, GO, GO, GO, GO,				// SP ! " # $ % & '
+	WHITE, GO, GO, GO, GO, GO, GO, GO,				// SP ! " # $ % & '
 	OK, OK, GO, GO, OK, GO, GO, GO,					// ( ) * + , - . /
 	DIG, DIG, DIG, DIG, DIG, DIG, DIG, DIG,			// 0 1 2 3 4 5 6 7
 	DIG, DIG, GO, OK, GO, GO, GO, OK,				// 8 9 : ; < = > ?
@@ -51,6 +51,13 @@ char cclass_[256] =
 inline char cclass(char c)
 	{
 	return cclass_[static_cast<unsigned char>(c)];
+	}
+
+bool iswhite(const char* s)
+	{
+	while (cclass(*s) == WHITE)
+		++s;
+	return *s;
 	}
 
 void scanner_locale_changed()
@@ -115,9 +122,9 @@ int Scanner::next()
 
 int Scanner::nextall()
 	{
-	int state;
+	int state = 0;
 
-	prev = si; state = 0; keyword = 0; value = "";
+	prev = si; keyword = 0; value = "";
 	for (;;)
 		{
 		switch (state)
@@ -268,12 +275,11 @@ int Scanner::nextall()
 			else
 				return ':';
 		case '_' :
-			buf.clear();
 			while (ID == cclass(source[si]) || DIG == cclass(source[si]))
 				++si;
 			if (source[si] == '?' || source[si] == '!')
 				++si;
-			buf.add(source + prev, si - prev);
+			buf.clear().add(source + prev, si - prev);
 			value = buf.str();
 			keyword = keywords(value);
 			if (source[si] != ':' ||
@@ -298,7 +304,7 @@ int Scanner::nextall()
 				{
 				len = numlen(source + si);
 				verify(len > 0);
-				if (source[si + len - 1] == '.')
+				if (source[si + len - 1] == '.' && iswhite(source + si + len))
 					--len;
 				buf.add(source + si, len);
 				si += len;
@@ -314,10 +320,9 @@ int Scanner::nextall()
 				return '.';
 			break ;
 		case '`' :
-			buf.clear();
 			while (source[si] && source[si] != '`')
 				++si;
-			buf.add(source + prev + 1, si - prev - 1);
+			buf.clear().add(source + prev + 1, si - prev - 1);
 			if (source[si])
 				++si;	// skip closing quote
 			value = buf.str();
@@ -342,6 +347,17 @@ int Scanner::nextall()
 			len = buf.size();
 			return T_STRING;
 			}
+		case '#':
+			if (ID != cclass(source[si]))
+				return '#';
+			while (ID == cclass(source[si]) || DIG == cclass(source[si]))
+				++si;
+			if (source[si] == '?' || source[si] == '!')
+				++si;
+			buf.clear().add(source + prev + 1, si - prev - 1);
+			value = buf.str();
+			len = buf.size();
+			return T_STRING;
 		default :
 			unreachable();
 			}
@@ -357,13 +373,14 @@ inline int octval(char c)
 inline bool isodigit(char c)
 	{ return '0' <= c && c <= '7'; }
 
-// should be called with i pointing at backslash
-//
 /* static */ char Scanner::doesc(const char* src, int& i)
 	{
+	verify(src[i] == '\\');
 	++i; // backslash
 	switch (src[i])
 		{
+	case '0' :
+		return 0;
 	case 'n' :
 		return '\n';
 	case 't' :
@@ -383,13 +400,7 @@ inline bool isodigit(char c)
 	case '\'' :
 		return src[i];
 	default :
-		if (isodigit(src[i]) && isodigit(src[i + 1]) && isodigit(src[i + 2]))
-			{
-			i += 2;
-			return octval(src[i]) + 	8 * octval(src[i-1]) + 64 * octval(src[i-2]);
-			}
-		else
-			return src[--i];
+		return src[--i];
 		}
 	}
 
@@ -400,7 +411,6 @@ struct Keyword
 	};
 static Keyword words[] =
 	{
-	{ "False", K_FALSE }, { "True", K_TRUE },
 	{ "and", T_AND }, { "bool", K_BOOL}, { "break", K_BREAK },
 	{ "buffer", K_BUFFER }, { "callback", K_CALLBACK },
 	{ "case", K_CASE }, { "catch", K_CATCH }, { "char", K_INT8 },
@@ -452,13 +462,13 @@ int Scanner::keywords(const char* s)
 static const char* input = "and break case catch continue class callback default dll do \
 	else for forever function if is isnt or not \
 	new switch struct super return throw try while \
-	true True false False \
+	true false \
 	== = =~ ~ != !~ ! <<= << <> <= < \
 	>>= >> >= > || |= | && &= &  \
 	^= ^ -- -= - ++ += + /= / \
 	*= * %= % $= $ name _name name123 '\\Ahello\\'world\\Z' \
 	\"string\" 123 123name .name  Name Name123 name? 1$2 +1 num=1 \
-	num+=1 1%2 /*comments*/ //comments";
+	num+=1 1%2 #id /*comments*/ //comments";
 
 struct Result
 	{
@@ -475,7 +485,7 @@ static Result results[] =
 	{ K_IF, 0 }, { I_IS, 0 }, { I_ISNT, 0 }, { T_OR, 0 }, { I_NOT, 0 },
 	{ K_NEW, 0 }, { K_SWITCH, 0 }, { K_STRUCT, 0 }, { K_SUPER, 0 },
 	{ K_RETURN, 0 }, { K_THROW, 0 }, { K_TRY, 0 }, { K_WHILE, 0 },
-	{ K_TRUE, 0 }, { K_TRUE, 0 }, { K_FALSE, 0 }, { K_FALSE, 0 },
+	{ K_TRUE, 0 }, { K_FALSE, 0 },
 	{ I_IS, 0 }, { I_EQ, 0 }, { I_MATCH, 0 }, { I_BITNOT, 0 },
 	{ I_ISNT, 0 }, { I_MATCHNOT, 0 }, { I_NOT, 0 },
 	{ I_LSHIFTEQ, 0 }, { I_LSHIFT, 0 },	{ I_ISNT, 0 }, { I_LTE, 0 },
@@ -494,23 +504,23 @@ static Result results[] =
 	{ T_NUMBER, "1" }, { I_CAT, 0 }, { T_NUMBER, "2" }, { I_ADD, 0 },
 	{ T_NUMBER, "1" }, { T_IDENTIFIER, "num" }, { I_EQ, 0 }, { T_NUMBER, "1" },
 	{ T_IDENTIFIER, "num" }, { I_ADDEQ, 0 }, { T_NUMBER, "1" },
-	{ T_NUMBER, "1" }, { I_MOD, 0 }, {T_NUMBER, "2" },
-	{ T_STRING, "comment" }
+	{ T_NUMBER, "1" }, { I_MOD, 0 }, {T_NUMBER, "2" }, { T_STRING, "id" }
 	};
 
 class test_scanner : public Tests
 	{
 	TEST(1, scan)
 		{
-		int token;
+		int i, token;
 		Scanner sc(input);
-		for (int i = 0; Eof != (token = sc.next()); ++i)
+		for (i = 0; Eof != (token = sc.next()); ++i)
 			{
 			asserteq(results[i].token,
 				(results[i].token < KEYWORDS ? token : sc.keyword));
 			if (results[i].value)
 				asserteq(gcstring(sc.value), gcstring(results[i].value));
 			}
+		verify(i == sizeof results / sizeof(Result));
 		}
 	};
 REGISTER(test_scanner);

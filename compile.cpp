@@ -51,6 +51,7 @@
 #include "sublock.h" // for BLOCK_REST
 #include "varint.h"
 #include "opcodes.h"
+#include "ostreamstr.h"
 
 bool getSystemOption(const char* option, bool def_value);
 
@@ -102,7 +103,7 @@ public:
 	void matchnew();
 	void matchnew(int t);
 	void ckmatch(int t);
-	[[noreturn]] void syntax_error(const char* err = "") const;
+	[[noreturn]] void syntax_error_(const char* err = "") const;
 
 	void member(SuObject* ob, const char* gname, const char* className, short base);
 	void member(SuObject* ob)
@@ -114,6 +115,13 @@ private:
 protected:
 	bool anyName() const;
 	};
+
+#define syntax_error(stuff) \
+	do { \
+	OstreamStr os; \
+	os << stuff; \
+	syntax_error_(os.str()); \
+	} while (false)
 
 struct PrevLit
 	{
@@ -187,6 +195,7 @@ private:
 	void expr0(bool newtype = false);
 	void args(short&, vector<ushort>&, const char* delims = "()");
 	void args_at(short& nargs, const char* delims);
+	void add_argname(vector<ushort>& argnames, int id);
 	void args_list(short& nargs, const char* delims, vector<ushort>& argnames);
 	void keywordArgShortcut(vector<ushort>& argnames);
 	bool isKeyword();
@@ -200,6 +209,7 @@ private:
 	void patch(short);
 	void mark();
 	void params(vector<char>& flags);
+	ushort param();
 	bool notAllZero(vector<char>& flags);
 	void emit_target(int option, int target);
 	ushort mem(const char* s);
@@ -210,7 +220,7 @@ Value compile(const char* s, const char* gname, CodeVisitor* visitor)
 	Compiler compiler(s, visitor);
 	Value x = compiler.constant(gname, gname);
 	if (compiler.token != -1)
-		compiler.syntax_error();
+		compiler.syntax_error_();
 	return x;
 	}
 
@@ -230,11 +240,20 @@ Value Compiler::constant(const char* gname, const char* className)
 		{
 	case I_SUB :
 		match();
-		return -constant();
+		return -number();
+	case I_ADD :
+		match();
+		// fallthrough
 	case T_NUMBER :
 		return number();
 	case T_STRING :
 		{
+		if (scanner.source[scanner.prev] == '#')
+			{
+			x = symbol(scanner.value);
+			match();
+			return x;
+			}
 		gcstring s;
 		while (true)
 			{
@@ -253,12 +272,6 @@ Value Compiler::constant(const char* gname, const char* className)
 			{
 			if (! ((x = SuDate::literal(scanner.value))))
 				syntax_error("bad date literal");
-			match();
-			return x;
-			}
-		else if (anyName())
-			{
-			x = symbol(scanner.value);
 			match();
 			return x;
 			}
@@ -306,7 +319,7 @@ Value Compiler::constant(const char* gname, const char* className)
 		match();
 		return x;
 		}
-	syntax_error();
+	syntax_error_();
 	}
 
 bool Compiler::anyName() const
@@ -344,7 +357,7 @@ Value Compiler::object() //=======================================
 		match();
 		}
 	else
-		syntax_error();
+		syntax_error_();
 	while (token != end)
 		{
 		member(ob);
@@ -385,7 +398,7 @@ Value Compiler::suclass(const char* gname, const char* className)
 		if (*scanner.value == '_')
 			{
 			if (! gname || 0 != strcmp(gname, scanner.value + 1))
-				except("invalid reference to " << scanner.value);
+				syntax_error("invalid reference to " << scanner.value);
 			base = globals.copy(ckglobal(scanner.value)); // throws if undefined
 			}
 		else
@@ -417,7 +430,7 @@ void Compiler::member(SuObject* ob, const char* gname, const char* className, sh
 		minus = true;
 		match();
 		if (token != T_NUMBER)
-			syntax_error();
+			syntax_error_();
 		}
 	bool default_allowed = true;
 	int ahead = scanner.ahead();
@@ -439,7 +452,7 @@ void Compiler::member(SuObject* ob, const char* gname, const char* className, sh
 				}
 			}
 		else
-			syntax_error();
+			syntax_error_();
 		if (token == ':')
 			match();
 		}
@@ -460,12 +473,12 @@ void Compiler::member(SuObject* ob, const char* gname, const char* className, sh
 	else if (default_allowed)
 		x = SuTrue; // default value
 	else
-		syntax_error();
+		syntax_error_();
 
 	if (mv)
 		{
 		if (ob->get(mv))
-			except("duplicate member name (" << mv << ")");
+			syntax_error("duplicate member name (" << mv << ")");
 		ob->put(mv, x);
 		}
 	else
@@ -570,7 +583,7 @@ Value Compiler::dll()
 			match(K_IN);
 			match(']');
 			if (scanner.keyword != K_STRING)
-				syntax_error();
+				syntax_error_();
 			paramtypes[n].gnum = globals("instring");
 			}
 		else if (token == T_IDENTIFIER)
@@ -580,7 +593,7 @@ Value Compiler::dll()
 			paramtypes[n].gnum = globals(scanner.value);
 			}
 		else
-			syntax_error();
+			syntax_error_();
 		match();
 		paramtypes[n].n = 1;
 		// TODO: Reject pointer-to-primitive at syntax level.
@@ -703,10 +716,10 @@ void Compiler::match1()
 void Compiler::ckmatch(int t)
 	{
 	if (t != (t < KEYWORDS ? token : scanner.keyword))
-		syntax_error();
+		syntax_error_();
 	}
 
-void Compiler::syntax_error(const char* err) const
+void Compiler::syntax_error_(const char* err) const
 	{
 	// figure out the line number
 	int line = 1;
@@ -744,7 +757,7 @@ SuFunction* FunctionCompiler::function()
 	params(flags);
 
 	if (token != '{')
-		syntax_error();
+		syntax_error_();
 	body();
 
 	mark();
@@ -795,6 +808,7 @@ void FunctionCompiler::params(vector<char>& flags)
 			if (scanner.value[0] == '_')
 				{
 				++scanner.value;
+				++scanner.prev;
 				flags[nparams] |= DYN;
 				}
 			if ((flags[nparams] & DOT) && isupper(*scanner.value))
@@ -804,12 +818,10 @@ void FunctionCompiler::params(vector<char>& flags)
 				scanner.value = s;
 				flags[nparams] |= PUB;
 				}
-			int i = local(INIT);
+			int i = param();
 			if (flags[nparams] & DOT)
 				// mark as used to prevent code warning
 				scanner.visitor->local(scanner.prev, i, false);
-			if (i != locals.size() - 1)
-				except("duplicate function parameter (" << scanner.value << ")");
 			match(T_IDENTIFIER);
 
 			if (token == I_EQ)
@@ -829,6 +841,15 @@ void FunctionCompiler::params(vector<char>& flags)
 			}
 		}
 	matchnew(')');
+	}
+
+ushort FunctionCompiler::param()
+	{
+	int before = locals.size();
+	int i = local(INIT);
+	if (i != before)
+		syntax_error("duplicate function parameter (" << scanner.value << ")");
+	return i;
 	}
 
 bool FunctionCompiler::notAllZero(vector<char>& flags)
@@ -898,7 +919,7 @@ void FunctionCompiler::block()
 			np = locals.size() - first;
 			}
 		if (token != I_BITOR) // i.e. |
-			syntax_error();
+			syntax_error_();
 		}
 
 	static int it = symnum("it");
@@ -1143,7 +1164,7 @@ void FunctionCompiler::statement(short cont, short* pbrk)
 			emit(I_THROW);
 			}
 		else
-			syntax_error();
+			syntax_error_();
 		break ;
 	case K_BREAK :
 		match();
@@ -1158,7 +1179,7 @@ void FunctionCompiler::statement(short cont, short* pbrk)
 			emit(I_THROW);
 			}
 		else
-			syntax_error();
+			syntax_error_();
 		break ;
 	case K_RETURN :
 		match1(); // don't discard newline
@@ -1328,7 +1349,7 @@ void FunctionCompiler::stmtexpr()
 		scanner.keyword != K_CATCH &&
 		scanner.keyword != K_WHILE &&
 		scanner.keyword != K_ELSE)
-		syntax_error();
+		syntax_error_();
 	}
 
 void FunctionCompiler::exprlist() // used by for
@@ -1568,11 +1589,12 @@ void FunctionCompiler::expr0(bool newtype)
 		{
 	case T_STRING :
 		{
-		SuString* s = (scanner.len == 0)
-			? SuString::empty_string
-			: new SuString(scanner.value, scanner.len);
+		Value x = (scanner.source[scanner.prev] == '#') ? symbol(scanner.value)
+			: (scanner.len == 0)
+				? SuEmptyString
+				: new SuString(scanner.value, scanner.len);
 		match();
-		emit(I_PUSH, LITERAL, literal(s));
+		emit(I_PUSH, LITERAL, literal(x));
 		option = LITERAL;
 		lvalue = value = false;
 		break ;
@@ -1604,7 +1626,7 @@ void FunctionCompiler::expr0(bool newtype)
 			match();
 			super = true;
 			if (incdec || base < 0)
-				syntax_error();
+				syntax_error_();
 			if (last_adr == 0 // not -1 because mark() has generated NOP
 				&& newfn && token == '(')
 				{
@@ -1638,21 +1660,15 @@ void FunctionCompiler::expr0(bool newtype)
 					lvalue = false;
 					id = globals(scanner.value);
 					scanner.visitor->global(scanner.prev, scanner.value);
-					if (id == TrueNum || id == FalseNum)
-						{
-						emit(I_PUSH, LITERAL,
-							literal(id == TrueNum ? SuTrue : SuFalse));
-						lvalue = value = false;
-						}
 					}
 				else if (option == LITERAL) // _Name
 					{
 					// check if name is the name of what we're compiling
 					if (! gname || 0 != strcmp(gname, scanner.value + 1))
-						except("invalid reference to " << scanner.value);
+						syntax_error("invalid reference to " << scanner.value);
 					Value x = globals.get(scanner.value + 1);
 					if (! x)
-						except("can't find " << scanner.value);
+						syntax_error("can't find " << scanner.value);
 					scanner.visitor->global(scanner.prev, scanner.value);
 					emit(I_PUSH, LITERAL, literal(x));
 					lvalue = value = false;
@@ -1702,7 +1718,7 @@ void FunctionCompiler::expr0(bool newtype)
 		lvalue = value = false;
 		break ;
 	default :
-		syntax_error();
+		syntax_error_();
 		}
 	while (token == '.' || token == '[' || token == '(' ||
 		(token == '{' && ! expecting_compound))
@@ -1774,21 +1790,23 @@ void FunctionCompiler::expr0(bool newtype)
 	if (incdec)
 		{
 		if (! lvalue)
-			syntax_error();
+			syntax_error_();
 		emit(incdec, 0x80 + (option << 4), id);
 		}
 	else if (I_ADDEQ <= token && token <= I_EQ)
 		{
 		int t = token;
 		if (! lvalue)
-			syntax_error();
-		if (token == I_EQ && local_pos != -1 && (option == AUTO || option == DYNAMIC))
-			scanner.visitor->local(local_pos, id, INIT); // fix up previous
+			syntax_error_();
+		bool fixup = token == I_EQ && local_pos != -1 && 
+			(option == AUTO || option == DYNAMIC);
+		if (fixup)
+			scanner.visitor->local(-1, id, false); // undo previous incorrect "usage"
 		matchnew();
 		if (scanner.keyword == K_FUNCTION || scanner.keyword == K_CLASS)
 			{
 			if (t != I_EQ)
-				syntax_error();
+				syntax_error_();
 			Value k = constant();
 			Named* n = const_cast<Named*>(k.get_named());
 			verify(n);
@@ -1801,12 +1819,14 @@ void FunctionCompiler::expr0(bool newtype)
 			}
 		else
 			expr();
+		if (fixup)
+			scanner.visitor->local(local_pos, id, INIT);
 		emit(t, 0x80 + (option << 4), id);
 		}
 	else if (token == I_PREINC || token == I_PREDEC)
 		{
 		if (! lvalue)
-			syntax_error();
+			syntax_error_();
 		emit(token + 2, 0x80 + (option << 4), id);
 		match();
 		}
@@ -1828,7 +1848,7 @@ void FunctionCompiler::args(short& nargs, vector<ushort>& argnames, const char* 
 		{
 		if (! just_block)
 			args_list(nargs, delims, argnames);
-		if (token == T_NEWLINE && ! expecting_compound && scanner.ahead() == '{')
+		while (token == T_NEWLINE && ! expecting_compound && scanner.ahead() == '{')
 			match();
 		if (token == '{')
 			{ // take block following args as another arg
@@ -1856,13 +1876,6 @@ void FunctionCompiler::args_at(short& nargs, const char* delims)
 	match(delims[1]);
 	}
 
-static void add_argname(vector<ushort>& argnames, int id)
-	{
-	if (find(argnames.begin(), argnames.end(), id) != argnames.end())
-		except("duplicate argument name: " << symstr(id));
-	argnames.push_back(id);
-	}
-
 void FunctionCompiler::args_list(short& nargs, const char* delims, vector<ushort>& argnames)
 	{
 	bool key = false;
@@ -1883,12 +1896,12 @@ void FunctionCompiler::args_list(short& nargs, const char* delims, vector<ushort
 					id = symnum(scanner.value);
 				else if (token == T_NUMBER)
 					{
-					id = strtoul(scanner.value, NULL, 0);
+					id = strtoul(scanner.value, NULL, 0); //FIXME check end
 					if (id >= 0x8000)
-						except("numeric subscript overflow: (" << scanner.value << ")");
+						syntax_error("numeric subscript overflow: (" << scanner.value << ")");
 					}
 				else
-					syntax_error();
+					syntax_error_();
 				add_argname(argnames, id);
 				match();
 				match();
@@ -1911,7 +1924,7 @@ void FunctionCompiler::keywordArgShortcut(vector<ushort>& argnames)
 	// f(:name) is equivalent to f(name: name)
 	match(':');
 	if (! just_name())
-		syntax_error();
+		syntax_error_();
 	add_argname(argnames, symnum(scanner.value));
 	expr0();
 	}
@@ -1936,6 +1949,13 @@ bool FunctionCompiler::just_name()
 		default:
 			return true;
 		}
+	}
+
+void FunctionCompiler::add_argname(vector<ushort>& argnames, int id)
+	{
+	if (find(argnames.begin(), argnames.end(), id) != argnames.end())
+		syntax_error("duplicate argument name: " << symstr(id));
+	argnames.push_back(id);
 	}
 
 void FunctionCompiler::record()
@@ -1963,18 +1983,18 @@ void FunctionCompiler::record()
 					id = symnum(scanner.value);
 				else if (token == T_NUMBER)
 					{
-					id = strtoul(scanner.value, NULL, 0);
+					id = strtoul(scanner.value, NULL, 0); //FIXME check end
 					if (id >= 0x8000)
-						except("numeric subscript overflow: (" << scanner.value << ")");
+						syntax_error("numeric subscript overflow: (" << scanner.value << ")");
 					}
 				else
-					syntax_error();
+					syntax_error_();
 				add_argname(argnames, id);
 				match();
 				match();
 				}
 			else if (key)
-				syntax_error();
+				syntax_error_();
 			prevlits.clear();
 			if (key && (scanner.ahead() == ':' || token == ',' || token == ']'))
 				emit(I_PUSH, LITERAL, literal(SuTrue));
@@ -2115,7 +2135,7 @@ short FunctionCompiler::emit(short op, short option, short target,
 		case I_SUB : result = prev1.lit - prev2.lit; break ;
 		case I_MUL : result = prev1.lit * prev2.lit; break ;
 		case I_DIV : result = prev1.lit / prev2.lit; break ;
-		case I_CAT : result = new SuString(prev1.lit.gcstr() + prev2.lit.gcstr()); break ;
+		case I_CAT : result = new SuString(prev1.lit.to_gcstr() + prev2.lit.to_gcstr()); break ;
 		case I_MOD : result = prev1.lit.integer() % prev2.lit.integer(); break ;
 		case I_LSHIFT : result = (ulong) prev1.lit.integer() << prev2.lit.integer(); break ;
 		case I_RSHIFT : result = (ulong) prev1.lit.integer() >> prev2.lit.integer(); break ;
@@ -2269,7 +2289,6 @@ Value Compiler::memname(const char* className, const char* s)
 	}
 
 #include "testing.h"
-#include "ostreamstr.h"
 #include "except.h"
 #include "exceptimp.h"
 
@@ -2284,12 +2303,6 @@ static Cmpltest cmpltests[] =
 	{ "123;", "123; }\n\
 					  0  nop \n\
 					  1  push int 123\n\
-					  4  return \n\
-					  5\n" },
-
-	{ "0377;", "0377; }\n\
-					  0  nop \n\
-					  1  push int 255\n\
 					  4  return \n\
 					  5\n" },
 
@@ -2383,18 +2396,6 @@ static Cmpltest cmpltests[] =
 					  1  push global X\n\
 					  4  return \n\
 					  5\n" },
-
-	{ "True;", "True; }\n\
-					  0  nop \n\
-					  1  push value true \n\
-					  2  return \n\
-					  3\n" },
-
-	{ "False;", "False; }\n\
-					  0  nop \n\
-					  1  push value false \n\
-					  2  return \n\
-					  3\n" },
 
 	{ "\"\";", "\"\"; }\n\
 					  0  nop \n\
@@ -3397,7 +3398,7 @@ c();  \n\
 } }\n\
 					 44  nop \n\
 					 45  pop \n\
-					 46  push literal #\"unhandled switch value\"\n\
+					 46  push literal \"unhandled switch value\"\n\
 					 47  throw \n\
 					 48  pop \n\
 \n\
@@ -3702,7 +3703,7 @@ class test_compile : public Tests
 	void process(int i, const char* code, const char* result);
 	TEST(1, function)
 		{
-		const char* s = "function (a, b = 0, c = False, d = 123, e = 'hello') { }";
+		const char* s = "function (a, b = 0, c = false, d = 123, e = 'hello') { }";
 		SuFunction* fn = force<SuFunction*>(compile(s));
 		verify(fn->nparams == 5);
 		verify(fn->ndefaults == 4);

@@ -37,15 +37,21 @@ class SuValue
 	{
 public:
 	virtual ~SuValue() = default;
+
 	virtual void out(Ostream&) const = 0;
 
 	virtual size_t hashfn() const;
-	virtual int integer() const;
-	virtual gcstring gcstr() const;
+
 	virtual int symnum() const;				// creates if necessary
-	virtual bool int_if_num(int* pn) const;	// defined by SuNumber
-	virtual SuNumber* number();				// defined by SuNumber & SuString
+
 	virtual const char* str_if_str() const;	// defined by SuString
+	virtual gcstring gcstr() const;			// no coerce
+	virtual gcstring to_gcstr() const;		// defined by SuBoolean and SuNumber
+
+	virtual bool int_if_num(int* pn) const;	// only defined by SuNumber
+	virtual int integer() const;			// only coerces "" and false to 0
+	virtual SuNumber* number();				// only coerces "" and false to 0
+
 	virtual SuObject* ob_if_ob();			// defined by SuObject & SuSeq
 	SuObject* object();
 

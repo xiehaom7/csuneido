@@ -199,14 +199,14 @@ Value SuDate::instantiate(short nargs, short nargnames, ushort* argnames, int ea
 			return ARG(0);
 		else
 			{
-			auto s = ARG(0).str();
-			if (*s == '#')
+			auto s = ARG(0).to_gcstr();
+			if (s[0] == '#')
 				{
-				Value x = SuDate::literal(s);
+				Value x = SuDate::literal(s.str());
 				return x ? x : SuFalse;
 				}
 			else
-				return parse(s);
+				return parse(s.str());
 			}
 		}
 	else if (nargs == 2 && nargnames == 0)
@@ -790,15 +790,16 @@ Value SuDate::WeekDay(short nargs, short nargnames, ushort* argnames, int each)
 	int i = 0;
 	if (nargs == 1)
 		{
-		if (! ARG(0).int_if_num(&i))
+		if (auto s = ARG(0).str_if_str())
 			{
-			auto s = ARG(0).str();
 			for (i = 0; i < 7; ++i)
 				if (0 == memcmpic(s, weekday[i], strlen(s)))
-					break ;
+					break;
 			if (i >= 7)
 				except("usage: date.WeekDay( <day of week> )");
 			}
+		else
+			i = ARG(0).integer();
 		}
 	DateTime dt(date, time);
 	return (dt.day_of_week() - i + 7) % 7;

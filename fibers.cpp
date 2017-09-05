@@ -38,23 +38,29 @@
 #include "win.h"
 #include "qpc.h"
 #include <functional>
+#include "gcstring.h"
+#include "ostreamstr.h"
 
 //#include "ostreamcon.h"
 //#define LOG(stuff) con() << stuff << endl
 #define LOG(stuff)
 
+static int fiber_count = 0;
+
 struct Fiber
 	{
-	enum Status { READY, BLOCKED, ENDED, REUSE }; // NOTE: sequence is significant
-	Fiber()
+	enum Status { READY, BLOCKED, REUSE }; 
+	Fiber() : status(REUSE)
 		{ }
 	explicit Fiber(void* f, void* arg = nullptr)
 		: fiber(f), status(READY), arg_ref(arg)
-		{ }
+		{ fiber_number = ++fiber_count;	}
 	bool operator==(Status s) const
 		{ return status == s; }
 	void* fiber = nullptr;
-	Status status = REUSE;
+	Status status;
+	gcstring name;
+	int fiber_number = 0;
 	// for garbage collector
 	void* stack_ptr = nullptr;
 	void* stack_end = nullptr;
@@ -172,6 +178,13 @@ verify(Fibers::curFiberIndex() == MAIN);
 	GC_set_warn_proc(warn);
 	}
 
+static void deleteFiber(Fiber& f, int i, const char* from_fn)
+	{
+	LOG("delete fiber " << i << " from " << from_fn);
+	verify(&f != cur);
+	DeleteFiber(f.fiber);
+	}
+
 void Fibers::create(void (_stdcall *fiber_proc)(void* arg), void* arg)
 	{
 	void* f = CreateFiber(0, fiber_proc, arg);
@@ -179,6 +192,8 @@ void Fibers::create(void (_stdcall *fiber_proc)(void* arg), void* arg)
 	for (int i = 1; i < MAXFIBERS; ++i)
 		if (fibers[i].status == Fiber::REUSE)
 			{
+			if (fibers[i].fiber)
+				deleteFiber(fibers[i], i, "create");
 			LOG("create " << i);
 			fibers[i] = Fiber(f, arg);
 			return;
@@ -235,14 +250,13 @@ bool Fibers::yield()
 	for (int i = 1; i < MAXFIBERS; ++i)
 		{
 		fi = fi % (MAXFIBERS - 1) + 1;
-		if (fibers[fi].status == Fiber::ENDED)
+		Fiber& f = fibers[fi];
+		if (f.status == Fiber::REUSE && f.fiber)
 			{
-			// cleanup while we're searching
-			DeleteFiber(fibers[fi].fiber);
-			memset(&fibers[fi], 0, sizeof (Fiber));
-			fibers[fi].status = Fiber::REUSE;
+			deleteFiber(f, fi, "yield");
+			f = Fiber(); // to help garbage collection
 			}
-		else if (runnable(fibers[fi]))
+		else if (runnable(f))
 			{
 			switchto(fi);
 			return true;
@@ -286,7 +300,7 @@ void Fibers::end()
 	{
 	LOG("end " << curFiberIndex());
 	verify(!inMain());
-	cur->status = Fiber::ENDED;
+	cur->status = Fiber::REUSE;
 	yield();
 	unreachable();
 	}
@@ -294,7 +308,7 @@ void Fibers::end()
 static void foreach_fiber(std::function<void(Fiber&)> f)
 	{
 	for (int i = 0; i < MAXFIBERS; ++i)
-		if (fibers[i].status < Fiber::ENDED)
+		if (fibers[i].status != Fiber::REUSE)
 			f(fibers[i]);
 	}
 
@@ -326,4 +340,43 @@ int Fibers::size()
 	int n = 0;
 	foreach_fiber([&n](Fiber&){ ++n; });
 	return n - 1; // exclude main fiber
+	}
+
+static gcstring build_fiber_name(const gcstring& name, int fiber_number)
+	{
+	OstreamStr os;
+	os << "Thread-" << fiber_number;
+	if (name != "")
+		os << " " << name;
+	return os.gcstr();
+	}
+
+gcstring Fibers::get_name()
+	{
+	return build_fiber_name(cur->name, cur->fiber_number);
+	}
+
+void Fibers::set_name(const gcstring& name)
+	{
+	cur->name = name;
+	}
+
+void Fibers::foreach_fiber_info(std::function<void(const gcstring&, const char*)> fn)
+	{
+	foreach_fiber([fn](Fiber& fiber)
+		{
+		if (&fibers[MAIN] == &fiber)
+			return;
+		gcstring fiber_name = build_fiber_name(fiber.name, fiber.fiber_number);
+		fn(fiber_name, fiber.status == Fiber::READY ? "READY" : "BLOCKED");
+		});
+	}
+
+const char* Fibers::default_sessionid()
+	{
+	if (inMain())
+		return "";
+	OstreamStr os;
+	os << fibers[MAIN].tls.fiber_id << ":" << Fibers::get_name();
+	return os.str();
 	}

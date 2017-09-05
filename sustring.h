@@ -52,12 +52,10 @@ public:
 
 	Value getdata(Value) override;
 
-	int integer() const override
-		{ return strtoul(s.str(), nullptr, 0); }
-
 	const char* str_if_str() const override
 		{ return str(); }
 
+	int integer() const override;
 	SuNumber* number() override;
 
 	int size() const
@@ -74,6 +72,8 @@ public:
 		{ return s.str(); }
 
 	gcstring gcstr() const override
+		{ return s; }
+	gcstring to_gcstr() const override
 		{ return s; }
 
 	int symnum() const override;
